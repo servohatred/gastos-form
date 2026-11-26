@@ -25,9 +25,23 @@
     #save { width: 100%; margin-top: 24px; padding: 16px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 17px; font-weight: 600; }
     #save:disabled { opacity: .5; }
     #status { margin-top: 12px; min-height: 1.4em; color: var(--hint); text-align: center; }
+    [hidden] { display: none !important; }
+    .est { margin: 0 0 4px; color: var(--hint); }
   </style>
 </head>
 <body>
+  <div id="cierre" hidden>
+    <h1>Cierre del día</h1>
+    <div class="label">Bancolombia (pesos)</div>
+    <p class="est" id="est-b">Estimado: …</p>
+    <input id="c-b" type="text" inputmode="decimal" autocomplete="off" placeholder="Saldo de la app, ej: 1.529.612">
+    <div class="label">Global66 (dólares, opcional)</div>
+    <p class="est" id="est-g">Estimado: …</p>
+    <input id="c-g" type="text" inputmode="decimal" autocomplete="off" placeholder="Saldo de la app, ej: 1250,40">
+    <button id="c-save" type="button" disabled>Guardar</button>
+    <div id="c-status" role="status"></div>
+  </div>
+  <div id="answer">
   <h1 id="question"></h1>
   <div class="label">¿Para quién es?</div>
   <div class="grid" id="personas"></div>
@@ -35,10 +49,78 @@
   <input id="motivo" type="text" maxlength="300" autocomplete="off" placeholder="Ej: mercado">
   <button id="save" type="button" disabled>Guardar</button>
   <div id="status" role="status"></div>
+  </div>
+  <script>
+    // S27: daily close mode (?m=cierre); the persona form below stays untouched otherwise
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      var params = new URLSearchParams(location.search);
+      if (params.get('m') !== 'cierre') return;
+      document.getElementById('answer').hidden = true;
+      document.getElementById('cierre').hidden = false;
+      var api = params.get('api');
+      var inB = document.getElementById('c-b');
+      var inG = document.getElementById('c-g');
+      var btn = document.getElementById('c-save');
+      var st = document.getElementById('c-status');
+      var saving = false;
+      if (tg) { tg.ready(); tg.expand(); }
+
+      function post(body) {
+        return fetch(api, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no CORS preflight
+          body: JSON.stringify(body),
+        }).then(function (r) { return r.json(); });
+      }
+      function refresh() { btn.disabled = saving || !inB.value.trim(); }
+      inB.addEventListener('input', refresh);
+
+      if (!tg || !tg.initData || !api) {
+        st.textContent = 'Abrí este formulario desde el bot de Telegram.';
+      } else {
+        post({ initData: tg.initData, action: 'estimates' })
+          .then(function (res) {
+            if (!res || !res.ok) { st.textContent = 'No se pudo cargar: ' + ((res && res.error) || 'error'); return; }
+            document.getElementById('est-b').textContent = 'Estimado: ' + (res.bancolombia === null ? 'sin saldo' : fmt(res.bancolombia, '$'));
+            document.getElementById('est-g').textContent = 'Estimado: ' + (res.global66 === null ? 'sin saldo' : fmt(res.global66, 'US$'));
+          })
+          .catch(function () { st.textContent = 'No se pudo cargar los estimados.'; });
+      }
+
+      function fmt(n, cur) {
+        var c = Math.round(Math.abs(Number(n)) * 100), i = Math.floor(c / 100), d = c % 100;
+        var s = String(i).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        if (cur === 'US$' || d) s += ',' + (d < 10 ? '0' : '') + d;
+        return (Number(n) < 0 ? '-' : '') + cur + s;
+      }
+
+      btn.addEventListener('click', function () {
+        if (!tg || !tg.initData || !api) { st.textContent = 'Abrí este formulario desde el bot de Telegram.'; return; }
+        saving = true; refresh();
+        st.textContent = 'Guardando…';
+        post({ initData: tg.initData, action: 'cierre', bancolombia: inB.value.trim(), global66: inG.value.trim() })
+          .then(function (res) {
+            if (res && res.ok) {
+              st.textContent = 'Guardado ✅';
+              setTimeout(function () { if (tg) tg.close(); }, 800);
+              return;
+            }
+            saving = false; refresh();
+            st.textContent = 'No se guardó: ' + ((res && res.error) || 'error');
+          })
+          .catch(function () {
+            saving = false; refresh();
+            st.textContent = 'No se guardó: no pude confirmar. Revisá el chat antes de reintentar.';
+          });
+      });
+    })();
+  </script>
   <script>
     (function () {
       var tg = window.Telegram && window.Telegram.WebApp;
       var params = new URLSearchParams(location.search);
+      if (params.get('m') === 'cierre') return;
       // the bot sends the persona list; this page holds no personal data
       var PERSONAS = (params.get('p') || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
       var id = params.get('id');
