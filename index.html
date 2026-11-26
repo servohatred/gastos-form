@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Responder</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #ffffff);
+      --text: var(--tg-theme-text-color, #111111);
+      --hint: var(--tg-theme-hint-color, #888888);
+      --accent: var(--tg-theme-button-color, #2481cc);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+      --card: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; font: 17px/1.4 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
+    .label { font-size: 13px; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 8px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .grid button { padding: 14px 4px; border: 2px solid transparent; border-radius: 12px; background: var(--card); color: var(--text); font-size: 16px; }
+    .grid button[aria-pressed="true"] { border-color: var(--accent); font-weight: 600; }
+    input { width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--card); color: var(--text); font-size: 17px; }
+    #save { width: 100%; margin-top: 24px; padding: 16px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 17px; font-weight: 600; }
+    #save:disabled { opacity: .5; }
+    #status { margin-top: 12px; min-height: 1.4em; color: var(--hint); text-align: center; }
+  </style>
+</head>
+<body>
+  <h1 id="question"></h1>
+  <div class="label">¿Para quién es?</div>
+  <div class="grid" id="personas"></div>
+  <div class="label">¿De qué fue?</div>
+  <input id="motivo" type="text" maxlength="300" autocomplete="off" placeholder="Ej: mercado">
+  <button id="save" type="button" disabled>Guardar</button>
+  <div id="status" role="status"></div>
+  <script>
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      var params = new URLSearchParams(location.search);
+      // the bot sends the persona list; this page holds no personal data
+      var PERSONAS = (params.get('p') || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+      var id = params.get('id');
+      var api = params.get('api');
+      var persona = null;
+      var saving = false;
+      var save = document.getElementById('save');
+      var motivo = document.getElementById('motivo');
+      var status = document.getElementById('status');
+
+      document.getElementById('question').textContent = params.get('q') || 'Movimiento';
+      if (tg) { tg.ready(); tg.expand(); }
+
+      var grid = document.getElementById('personas');
+      PERSONAS.forEach(function (p) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = p;
+        b.setAttribute('aria-pressed', 'false');
+        b.addEventListener('click', function () {
+          persona = p;
+          Array.prototype.forEach.call(grid.children, function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+          refresh();
+        });
+        grid.appendChild(b);
+      });
+
+      function refresh() { save.disabled = saving || !persona || !motivo.value.trim(); }
+      motivo.addEventListener('input', refresh);
+
+      function done(text) {
+        status.textContent = text;
+        setTimeout(function () { if (tg) tg.close(); }, 800);
+      }
+
+      save.addEventListener('click', function () {
+        if (!tg || !tg.initData || !id || !api) { status.textContent = 'Abrí este formulario desde el bot de Telegram.'; return; }
+        saving = true; refresh();
+        status.textContent = 'Guardando…';
+        fetch(api, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request: no CORS preflight
+          body: JSON.stringify({ initData: tg.initData, id: id, persona: persona, motivo: motivo.value.trim() }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (res && res.ok) { done('Guardado ✅'); return; }
+            saving = false; refresh();
+            status.textContent = 'No se guardó: ' + ((res && res.error) || 'error');
+          })
+          .catch(function () {
+            done('No pude confirmar. Si en el chat llegó "Guardado ✅", quedó guardado.');
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
